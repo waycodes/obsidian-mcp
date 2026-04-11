@@ -12,6 +12,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { GitVaultManager } from '@/services/git-vault-manager';
+import { FilteredVaultManager, parsePathPrefixes, parseExtraResources } from '@/services/filtered-vault-manager';
 import { registerTools } from '@/mcp/tool-registrations';
 import { registerResources } from '@/mcp/resource-registrations';
 import { loadEnv, ensureCoreEnvVars } from '@/env';
@@ -35,13 +36,20 @@ try {
 }
 
 const LOCAL_VAULT_PATH = process.env.LOCAL_VAULT_PATH || './vault-local';
+const SYNC_TTL = parseInt(process.env.VAULT_SYNC_TTL_SECONDS || '0', 10);
 
-const vaultManager = new GitVaultManager({
+const gitVaultManager = new GitVaultManager({
   repoUrl: process.env.VAULT_REPO!,
   branch: process.env.VAULT_BRANCH!,
   gitToken: process.env.GIT_TOKEN!,
   gitUsername: process.env.GIT_USERNAME,
   vaultPath: LOCAL_VAULT_PATH,
+  syncTtlSeconds: SYNC_TTL,
+});
+
+const vaultManager = new FilteredVaultManager(gitVaultManager, {
+  allowPaths: parsePathPrefixes(process.env.VAULT_ALLOW_PATHS),
+  denyPaths: parsePathPrefixes(process.env.VAULT_DENY_PATHS),
 });
 
 const mcpServer = new McpServer({
@@ -53,8 +61,10 @@ const mcpServer = new McpServer({
 console.error('Starting Obsidian MCP Server (local mode)...');
 console.error(`Vault path: ${LOCAL_VAULT_PATH}`);
 
+const extraResources = parseExtraResources(process.env.VAULT_EXTRA_RESOURCES);
+
 registerTools(mcpServer, () => vaultManager);
-registerResources(mcpServer, () => vaultManager);
+registerResources(mcpServer, () => vaultManager, extraResources);
 
 const transport = new StdioServerTransport();
 await mcpServer.connect(transport);

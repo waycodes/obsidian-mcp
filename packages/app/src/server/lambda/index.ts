@@ -8,6 +8,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { VaultManager } from '@/services/vault-manager';
 import { GitVaultManager } from '@/services/git-vault-manager';
+import { FilteredVaultManager, parsePathPrefixes, parseExtraResources } from '@/services/filtered-vault-manager';
 import { detectStartType, getInvocationCount, cleanupOldCache } from './cache.js';
 import { registerTools } from '@/mcp/tool-registrations';
 import { registerResources } from '@/mcp/resource-registrations';
@@ -49,15 +50,21 @@ let vaultManager: VaultManager | null = null;
 
 function getVaultManager(): VaultManager {
   if (!vaultManager) {
+    const syncTtl = parseInt(process.env.VAULT_SYNC_TTL_SECONDS || '0', 10);
     const config = {
       repoUrl: process.env.VAULT_REPO!,
       branch: process.env.VAULT_BRANCH!,
       gitToken: process.env.GIT_TOKEN!,
       gitUsername: process.env.GIT_USERNAME,
       vaultPath: '/tmp/obsidian-vault',
+      syncTtlSeconds: syncTtl,
     };
 
-    vaultManager = new GitVaultManager(config);
+    const git = new GitVaultManager(config);
+    vaultManager = new FilteredVaultManager(git, {
+      allowPaths: parsePathPrefixes(process.env.VAULT_ALLOW_PATHS),
+      denyPaths: parsePathPrefixes(process.env.VAULT_DENY_PATHS),
+    });
   }
 
   return vaultManager;
@@ -69,8 +76,10 @@ const mcpServer = new McpServer({
   instructions: MCP_SERVER_INSTRUCTIONS,
 });
 
+const extraResources = parseExtraResources(process.env.VAULT_EXTRA_RESOURCES);
+
 registerTools(mcpServer, getVaultManager);
-registerResources(mcpServer, getVaultManager);
+registerResources(mcpServer, getVaultManager, extraResources);
 
 const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID || 'obsidian-mcp-client';
 const OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET;

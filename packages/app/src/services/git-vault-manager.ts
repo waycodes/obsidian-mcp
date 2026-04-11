@@ -12,10 +12,12 @@ export interface VaultConfig {
   gitToken: string;
   gitUsername?: string;
   vaultPath: string;
+  syncTtlSeconds?: number;
 }
 
 export class GitVaultManager implements VaultManager {
   private config: VaultConfig;
+  private lastSyncAt: number = 0;
 
   constructor(config: VaultConfig) {
     this.config = config;
@@ -55,9 +57,9 @@ export class GitVaultManager implements VaultManager {
   }
 
   /**
-   * Initialize the vault (clone or sync on every invocation)
+   * Initialize the vault (clone or sync)
    * - Cold start: Clone the repo if it doesn't exist
-   * - Warm start: Sync with remote on every request
+   * - Warm start: Sync with remote, respecting TTL cache if configured
    */
   private async initialize(): Promise<void> {
     const vaultExists = existsSync(this.config.vaultPath);
@@ -68,9 +70,22 @@ export class GitVaultManager implements VaultManager {
         branch: this.config.branch,
       });
       await this.cloneVault();
+      this.lastSyncAt = Date.now();
     } else {
+      const ttl = (this.config.syncTtlSeconds ?? 0) * 1000;
+      const elapsed = Date.now() - this.lastSyncAt;
+
+      if (ttl > 0 && elapsed < ttl) {
+        logger.debug('Vault sync skipped (within TTL)', {
+          ttlMs: ttl,
+          elapsedMs: elapsed,
+        });
+        return;
+      }
+
       logger.debug('Vault exists, syncing with remote');
       await this.syncVault();
+      this.lastSyncAt = Date.now();
     }
   }
 

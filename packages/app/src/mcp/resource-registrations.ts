@@ -7,7 +7,11 @@ import type { VaultManager } from '@/services/vault-manager';
  * Resources provide contextual information about the vault that LLMs can
  * reference when needed, without loading the data upfront.
  */
-export function registerResources(server: McpServer, getVaultManager: () => VaultManager): void {
+export function registerResources(
+  server: McpServer,
+  getVaultManager: () => VaultManager,
+  extraResources?: Array<{ name: string; uri: string; path: string; description: string }>,
+): void {
   server.registerResource(
     'vault-readme',
     'obsidian://vault-readme',
@@ -66,4 +70,35 @@ export function registerResources(server: McpServer, getVaultManager: () => Vaul
       }
     },
   );
+
+  // Register additional resources if configured
+  if (extraResources) {
+    for (const resource of extraResources) {
+      server.registerResource(
+        resource.name,
+        resource.uri,
+        {
+          name: resource.name,
+          description: resource.description,
+          mimeType: 'text/markdown',
+          annotations: { readOnlyHint: true, openWorldHint: true },
+        },
+        async resUri => {
+          const vault = getVaultManager();
+          try {
+            const exists = await vault.fileExists(resource.path);
+            const text = exists
+              ? await vault.readFile(resource.path)
+              : `File not found: ${resource.path}`;
+            return { contents: [{ uri: resUri.href, mimeType: 'text/markdown', text }] };
+          } catch (error) {
+            const msg = error instanceof Error ? error.message : 'Unknown error';
+            return {
+              contents: [{ uri: resUri.href, mimeType: 'text/markdown', text: `Error: ${msg}` }],
+            };
+          }
+        },
+      );
+    }
+  }
 }

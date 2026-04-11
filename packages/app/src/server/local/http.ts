@@ -13,6 +13,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import express from 'express';
 import { GitVaultManager } from '@/services/git-vault-manager';
+import { FilteredVaultManager, parsePathPrefixes, parseExtraResources } from '@/services/filtered-vault-manager';
 import { registerTools } from '@/mcp/tool-registrations';
 import { registerResources } from '@/mcp/resource-registrations';
 import { registerOAuthRoutes } from '@/server/shared/oauth-routes';
@@ -51,12 +52,20 @@ if (!OAUTH_CLIENT_SECRET) {
   process.exit(1);
 }
 
-const vaultManager = new GitVaultManager({
+const SYNC_TTL = parseInt(process.env.VAULT_SYNC_TTL_SECONDS || '0', 10);
+
+const gitVaultManager = new GitVaultManager({
   repoUrl: process.env.VAULT_REPO!,
   branch: process.env.VAULT_BRANCH!,
   gitToken: process.env.GIT_TOKEN!,
   gitUsername: process.env.GIT_USERNAME,
   vaultPath: LOCAL_VAULT_PATH,
+  syncTtlSeconds: SYNC_TTL,
+});
+
+const vaultManager = new FilteredVaultManager(gitVaultManager, {
+  allowPaths: parsePathPrefixes(process.env.VAULT_ALLOW_PATHS),
+  denyPaths: parsePathPrefixes(process.env.VAULT_DENY_PATHS),
 });
 
 const mcpServer = new McpServer({
@@ -65,8 +74,10 @@ const mcpServer = new McpServer({
   instructions: MCP_SERVER_INSTRUCTIONS,
 });
 
+const extraResources = parseExtraResources(process.env.VAULT_EXTRA_RESOURCES);
+
 registerTools(mcpServer, () => vaultManager);
-registerResources(mcpServer, () => vaultManager);
+registerResources(mcpServer, () => vaultManager, extraResources);
 
 const app = express();
 app.use(express.json());
